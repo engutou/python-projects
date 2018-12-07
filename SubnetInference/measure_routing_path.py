@@ -2,6 +2,7 @@
 
 from random import shuffle
 import ipaddress
+import socket
 import sys
 sys.path.append('../NetworkProbing/')
 sys.path.append('../Util')
@@ -18,11 +19,11 @@ def main(datadir):
         shuffle(host_lists)
 
         count = 0
-        ret_data = ['src:\t' + '10.42.0.169']
+        ret_data = ['Vantage:\t' + socket.gethostbyname(socket.gethostname())]
         for dst in host_lists:
             rtpath = traceroute.traceroutefast(str(dst), timeout=1, ttl=range(1, 26), ostr=False)
             rtpath = [item[1] for item in rtpath]
-            ret_data.append(str(dst) + ':\t' + Util.list_to_str(rtpath))
+            ret_data.append(str(dst) + ':\t' + ' '.join(rtpath))
             count += 1
             if count % 1e3 == 0:
                 print(count, 'IPs are probed.')

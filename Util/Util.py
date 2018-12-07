@@ -20,13 +20,8 @@ def read_to_list(filename):
 def list_to_str(data_list, sep=' '):
     # 将data_list的所有元素合并为一个string，用>sep<分隔
     # 要求输入data_list的每个元素都可以转化为string
-    if data_list:
-        ret = ''
-        for d in data_list:
-            ret += (str(d) + sep)
-        return ret.rstrip(sep)
-    else:
-        return ''
+    data_list = [str(item) for item in data_list]
+    return sep.join(data_list)
 
 
 def write_list(data_list, filename, mode='w'):

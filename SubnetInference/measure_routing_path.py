@@ -20,7 +20,7 @@ def main(datadir, ttl=range(1, 26), repeat=1):
         count = 0
         ret_data = ['Vantage:\t' + socket.gethostbyname(socket.gethostname()),
                     'Destination:\t' + str(net),
-                    'TTL:\t' + ' '.join(ttl)]
+                    'TTL:\t' + ' '.join([str(t) for t in ttl])]
 
         while repeat > 0:
             repeat -= 1

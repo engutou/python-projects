@@ -1,4 +1,3 @@
-#! python
 # -*- coding:utf-8 -*-
 
 import networkx
@@ -9,10 +8,11 @@ sys.path.append('../Util')
 import Util
 
 
-# from collections import namedtuple
-# TraceFileHeadTemplate = namedtuple(typename='TraceFileHeadTemplate',
-#                                    field_names=['vantage'])
-TraceFileHead = ('Vantage',)
+from collections import namedtuple
+TraceFileHeadTemplate = namedtuple(typename='TraceFileHeadTemplate',
+                                   field_names=['src', 'dst'])
+TraceFileHead = TraceFileHeadTemplate(src='Vantage',
+                                      dst='Destination')
 
 
 def is_valid_trace(rtpath, verbose=0):
@@ -222,5 +222,5 @@ def main(filename):
 
 
 if "__main__" == __name__:
-    filename = 'D:\\python-projects\\SubnetInference\\Dataset\\AS109\\12.5.186.0-23.trace'
-    main(filename)
+    filename = './Dataset/Test/202.97.68.0-23.trace'
+    stat, g = main(filename)

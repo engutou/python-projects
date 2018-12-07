@@ -34,5 +34,5 @@ def main(datadir):
 
 
 if __name__ == '__main__':
-    datadir = './Dataset/AS109/'
+    datadir = './Dataset/Test/'
     main(datadir)

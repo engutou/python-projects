@@ -13,6 +13,8 @@ import Util
 def main(datadir, ttl=range(1, 26), repeat=1):
     subnet_list = Util.read_to_list(datadir + 'IpBlocks.txt')
     for net in subnet_list:
+        if net.startswith('#'):
+            continue
         print('Probing:', net)
         net = ipaddress.IPv4Network(net)
         host_list = list(net.hosts())

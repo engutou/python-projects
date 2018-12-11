@@ -10,9 +10,10 @@ import Util
 
 from collections import namedtuple
 TraceFileHeadTemplate = namedtuple(typename='TraceFileHeadTemplate',
-                                   field_names=['src', 'dst'])
+                                   field_names=['src', 'dst', 'ttl'])
 TraceFileHead = TraceFileHeadTemplate(src='Vantage',
-                                      dst='Destination')
+                                      dst='Destination',
+                                      ttl='TTL')
 
 
 def is_valid_trace(rtpath, verbose=0):
@@ -156,6 +157,7 @@ def clean_trace_data(trfile, lazy=True):
             lines[i] = items[0] + '\t' + ' '.join(rtpath)
     # 移除异常路径
     lines = list(filter(None, lines))
+    print('Generate cleaned trace file \"{0}\"'.format(os.path.abspath(clnfile)))
     Util.write_list(lines, clnfile)
     return OK, clnfile
 

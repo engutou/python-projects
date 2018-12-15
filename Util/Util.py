@@ -66,4 +66,4 @@ class CodeTimer(object):
             print('\"{0}\" end <<<<'.format(self.processName))
         except Exception:
             pass
-        print('>>>> TAKES time {time:.2f}sec <<<<'.format(time = time.time() - self.t0))
+        print('>>>> TAKES time {time:.2f}sec <<<<'.format(time=time.time() - self.t0))

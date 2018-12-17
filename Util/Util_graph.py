@@ -29,7 +29,7 @@ def __remove_nontrivial_stubs__(G, anchors):
         if n in anchors or n in nodes_to_remove:
             continue
 
-        anchors_introduce_multi_node_cut = []
+        exist_multi_cut = False
         for a in anchors:
             # 对于每个节点n，最多寻找两次minimum_node_cut即可判断该节点是否可被删除
             min_cut = nx.minimum_node_cut(G, a, n)
@@ -47,12 +47,10 @@ def __remove_nontrivial_stubs__(G, anchors):
                         break
                 G.add_edges_from(edges_to_add_back)
                 break
+            elif exist_multi_cut:
+                break  # 不可删除节点>n<
             else:
-                anchors_introduce_multi_node_cut.append(a)
-                if len(anchors_introduce_multi_node_cut) >= 2:
-                    # 不可删除节点>n<
-                    break
-
+                exist_multi_cut = True
     # 返回可移除的节点
     return nodes_to_remove
 

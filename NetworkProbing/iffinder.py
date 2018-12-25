@@ -77,6 +77,7 @@ def iffinder(dst_list, dport_start=DefaultDPort, dport_constant=False, count=1, 
 if __name__ == "__main__":
     test = ['202.97.85.14', '202.97.37.74', '175.184.246.13', '175.184.246.19']
     test = ['171.208.203.73', '171.208.197.141']
+    test = ['61.63.95.139', '61.63.94.174']
     ret = iffinder(test, count=10, stiff=1)
     for d, r in ret.items():
         print(d, ':', r)

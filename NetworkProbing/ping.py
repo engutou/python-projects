@@ -40,5 +40,6 @@ def ping(dst, proto='icmp', dport=DefaultDPort, count=1):
 
 if __name__ == "__main__":
     test = ['202.112.14.178', '202.97.85.14', '202.97.37.74']
+    test = ['61.63.95.139', '61.63.94.174']
     for d in test:
-        print(ping(d, proto='icmp', count=2))
+        print(ping(d, proto='tcp', count=2))

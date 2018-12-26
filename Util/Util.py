@@ -33,6 +33,31 @@ def list_to_str(data_list, sep=' '):
     return sep.join(data_list)
 
 
+def list_shrink(data_list, keep_order=False, allow_repeat=[]):
+    """
+    对list中的元素去重
+    :param data_list: list
+        原始数据
+    :param keep_order: boolean
+        True: 在保留元素在list中出现的顺序的前提下，去重
+    :param allow_repeat:
+        allow_repeat中存放的元素可以重复
+    :return:
+    """
+    if keep_order:
+        known_elements = set()
+        newlist = []
+        for d in data_list:
+            if d in known_elements:
+                continue
+            newlist.append(d)
+            if d not in allow_repeat:
+                known_elements.add(d)
+        data_list[:] = newlist
+    else:
+        data_list[:] = list(set(data_list))
+
+
 def write_list(data_list, filename, mode='w'):
     # 将list写入文件，每个元素对应一行
     # Each element occupy one line

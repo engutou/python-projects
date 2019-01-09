@@ -16,44 +16,6 @@ TraceFileHead = TraceFileHeadTemplate(src='Vantage',
                                       ttl='TTL')
 
 
-def is_valid_trace(rtpath, verbose=0):
-    """
-    判断traceroute探测得到的一条路由路径是否正确
-
-    :param rtpath: list
-        routing path, IP地址列表
-
-    :param verbose: int
-        控制信息输出，0：不输出；值越大，输出的信息越详细
-
-    :return ret: boolean
-        True
-    """
-    # 该路径至少包含两个IP地址
-    if len(rtpath) > 1:
-        # 判断每个非匿名IP是否只出现一次
-        ip_non_anonymous_list = list(filter(lambda x: x != '*', rtpath))
-        if len(ip_non_anonymous_list) < 2:
-            if verbose >= 1:
-                print('Invalid: A valid routing path must contain at least two non-anonymous IPs.')
-            return False
-
-        if len(ip_non_anonymous_list) == len(set(ip_non_anonymous_list)):
-            # 没有重复出现的IP地址，也就是没有路由环路
-            for i in range(len(rtpath)-1):
-                if rtpath[i] != '*' and rtpath[i+1] != '*':
-                    # 存在连续两个非匿名IP地址，该路径包含至少一条链路，于是valid
-                    return True
-        else:
-            if verbose >= 1:
-                print('Invalid: A valid routing path cannot have routing loops.')
-    else:
-        if verbose >= 1:
-            print('Invalid: A valid routing path must contain at least two hops.')
-
-    return False
-
-
 def extract_head(file_head):
     """
     根据traceroute探测数据文件抽取头部信息
@@ -151,7 +113,7 @@ def clean_trace_data(trfile, lazy=True):
         rtpath = rtpath[:len(rtpath) - h+1]
 
         # 3. 判断是否正常路径
-        if not is_valid_trace(rtpath):
+        if not Util.is_valid_trace(rtpath):
             lines[i] = None
         else:
             lines[i] = items[0] + '\t' + ' '.join(rtpath)
@@ -215,7 +177,7 @@ def build_topo_graph(trace_head, link_set):
 
 
 def main(filename):
-    stat, clnfile = clean_trace_data(trfile=filename)
+    stat, clnfile = clean_trace_data(trfile=filename, lazy=False)
     if stat:
         stat, trace_head, link_set = load_trace_file(trfile=clnfile)
         g = build_topo_graph(trace_head, link_set)
@@ -224,5 +186,5 @@ def main(filename):
 
 
 if "__main__" == __name__:
-    filename = './Dataset/Test/202.97.68.0-23.trace'
+    filename = '../SubnetInference/Dataset/Test/202.97.68.0-23.trace'
     stat, g = main(filename)

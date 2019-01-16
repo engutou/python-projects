@@ -8,6 +8,24 @@ sys.path.append('../Util')
 import Util
 from enum import Enum, unique
 from operator import itemgetter
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+def prefix_distance(first, second):
+    """Compute the prefix distance between two IPv4 addresses
+
+    example:
+        prefix_distance(IPv4Address('10.0.1.1'),
+                        IPv4Address('10.0.2.1')) ->
+                        9
+
+    :param first: the first IPv4Address object
+    :param second: the second IPv4Address object
+    :return: the prefix distance
+    """
+    first_int, second_int = int(first), int(second)
+    return len(bin(first_int ^ second_int)) - 2
 
 
 @unique
@@ -117,6 +135,18 @@ class IpTraceFileBase(object):
 
     @staticmethod
     def clean_link_data(link2data):
+        """
+        对每条链路的数据，只保留间隔最小的部分
+        example: link2data = {(a1.b1.c1.d1, a2.b2.c2.d2): [(1, 0.11), (2, 0.22), (1, 0.13)],
+                              (a2.b2.c2.d2, a3.b3.c3.d3): [(2, 0.21), (2, 0.22), (3, 0.33)]}
+                被处理后，变为：{(a1.b1.c1.d1, a2.b2.c2.d2): [(1, 0.11), (1, 0.13)],
+                              (a2.b2.c2.d2, a3.b3.c3.d3): [(2, 0.21), (2, 0.22)]}
+
+        :param link2data: dict
+            key = (source_node, target_node)
+            value = list of link data, each entry is a tuple: (link_length, link_latency)
+        :return: link2data在外部也会被修改
+        """
         for link, data in link2data.items():
             min_length = min(data, key=itemgetter(0))[0]
             link2data[link] = list(filter(lambda x: x[0] == min_length, data))
@@ -208,6 +238,8 @@ class IpTraceFileV2(IpTraceFileBase):
         :return link_set: dict
             key = (source_node, target_node)
             value = list of link data, each entry is a tuple: (link_length, link_latency)
+            e.g., {(a1.b1.c1.d1, a2.b2.c2.d2): [(1, 0.11), (1, 0.12), (1, 0.13), ...],
+                   (a2.b2.c2.d2, a3.b3.c3.d3): [(2, 0.21), (2, 0.22), (2, 0.23), ...]}
         """
         if self.type == FileType.original:
             stat = self.clean_trace_data(lazy=True)
@@ -245,10 +277,46 @@ class IpTraceFileV3(IpTraceFileBase):
     pass
 
 
+class IpTopo(networkx.DiGraph):
+    def __init__(self, incoming_graph_data=None, **attr):
+        networkx.DiGraph.__init__(self, incoming_graph_data, **attr)
+
+    def info(self):
+        info = networkx.info(self)
+        info += '\n'
+
+        number_leaf_nodes = sum([1 for n, d in ip_graph.out_degree() if d == 0])
+        info += "Number of leaf nodes (out degree = 0): %d\n" % number_leaf_nodes
+
+        number_root_nodes = sum([1 for n, d in ip_graph.in_degree() if d == 0])
+        info += "Number of root nodes (in degree = 0): %d\n" % number_root_nodes
+
+        return info
+
+    def update_prefix_distance(self):
+        distances = dict.fromkeys(self.edges(), 0.0)
+        for e in self.edges:
+            first, second = ipaddress.IPv4Address(e[0]), ipaddress.IPv4Address(e[1])
+            distances[e] = prefix_distance(first, second)
+        networkx.set_edge_attributes(self, distances, 'prefix_distance')
+
+
 if "__main__" == __name__:
-    # filename = '../link_172.16.117.37_ph.csv'
-    # tf = IpTraceFileV2(filename)
-    # tf.extract_trace_data()
+    filename = './link_172.16.117.37_ph.csv'
+    tf = IpTraceFileV2(filename)
+    link_set = tf.extract_trace_data()
 
     # todo: merge multiple files
     pass
+
+    ip_graph = IpTopo(name='ip_topo')
+    ip_graph.add_edges_from(link_set.keys())
+    print(ip_graph.info())
+    ip_graph.update_prefix_distance()
+
+    # plot...
+    distances = [item[-1]-0.5 for item in list(ip_graph.edges.data('prefix_distance', default=-1))]
+    h = plt.figure()
+    plt.xticks([1, 8, 16, 24, 32])
+    plt.hist(distances, bins=np.arange(0.5, 32.6, 1), rwidth=0.8)
+    plt.show()

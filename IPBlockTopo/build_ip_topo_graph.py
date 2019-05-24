@@ -3,15 +3,16 @@
 import networkx
 import ipaddress
 import os.path
-# import sys
-# sys.path.append('../Util')
-# import Util
-import Util.Util as Util
 from enum import Enum, unique
 from operator import itemgetter
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
-import community as louvian
+import copy
+import Util.Util as Util
+
+
+def get_ip_block(ip, prefix_length):
+    return str(ipaddress.IPv4Network(ip + '/' + str(prefix_length), strict=False))
 
 
 def prefix_distance(first, second):
@@ -22,16 +23,42 @@ def prefix_distance(first, second):
                         IPv4Address('10.0.2.1')) ->
                         9
 
-    :param first: the first IPv4Address object
-    :param second: the second IPv4Address object
+    :param first: the first ipaddress.IPv4Address object
+    :param second: the second ipaddress.IPv4Address object
     :return: the prefix distance
     """
-    first_int, second_int = int(first), int(second)
-    return len(bin(first_int ^ second_int)) - 2
+    return len(bin(int(first) ^ int(second))) - 2
+
+
+def delay_distance(d1, d2, bins=range(0, 501)):
+    """
+    根据时延的cdf计算二者的差异——用cdf曲线之间的面积度量
+    :param d1:
+    :param d2:
+    :param bins:
+    :return:
+    """
+    # print(min(d1), max(d1))
+    # print(min(d2), max(d2))
+    hist1, bin1 = np.histogram(d1, bins=bins, density=True)
+    hist2, bin2 = np.histogram(d2, bins=bins, density=True)
+
+    if np.isnan(hist1).any() or np.isnan(hist2).any():
+        return np.nan
+
+    cdfs = (np.cumsum(hist1), np.cumsum(hist2))
+    delta = sum(cdfs[1] - cdfs[0])
+    # plt.figure()
+    # plt.plot(cdfs[0])
+    # plt.plot(cdfs[1])
+    # plt.show()
+    assert not np.isnan(delta)
+    return delta
 
 
 @unique
 class FileType(Enum):
+    """ denote the version of the traceroute result file """
     original = 0
     cleaned = 1
 
@@ -268,7 +295,7 @@ class IpTraceFileV2(IpTraceFileBase):
             trace = [hop.split(':') for hop in trace]
             trace = list(zip(*trace))
             rtpath, rtts = list(trace[0]), list(trace[1])
-            link2data = self.extract_links(rtpath, rtts)
+            link2data = self.extract_links(rtpath, rtts=None)
             for link, data in link2data.items():
                 if link in link_set:
                     link_set[link].extend(data)
@@ -290,13 +317,13 @@ class IpTopo(networkx.DiGraph):
         info = networkx.info(self)
         info += '\n'
 
-        number_leaf_nodes = sum([1 for n, d in ip_graph.out_degree() if d == 0])
+        number_leaf_nodes = sum([1 for n, d in self.out_degree() if d == 0])
         info += "Number of leaf nodes (out degree = 0): %d\n" % number_leaf_nodes
 
-        number_root_nodes = sum([1 for n, d in ip_graph.in_degree() if d == 0])
+        number_root_nodes = sum([1 for n, d in self.in_degree() if d == 0])
         info += "Number of root nodes (in degree = 0): %d\n" % number_root_nodes
 
-        number_merge_nodes = sum([1 for n, d in ip_graph.in_degree() if d > 1])
+        number_merge_nodes = sum([1 for n, d in self.in_degree() if d > 1])
         info += "Number of merge nodes (in degree > 1): %d\n" % number_merge_nodes
 
         return info
@@ -304,126 +331,96 @@ class IpTopo(networkx.DiGraph):
     def update_prefix_distance(self):
         distances = dict.fromkeys(self.edges(), 0.0)
         for e in self.edges:
-            first, second = ipaddress.IPv4Address(e[0]), ipaddress.IPv4Address(e[1])
+            # 可同时兼容节点为子网或者单个IP的情况
+            first = ipaddress.IPv4Network(e[0]).network_address
+            second = ipaddress.IPv4Network(e[1]).network_address
             distances[e] = prefix_distance(first, second)
         networkx.set_edge_attributes(self, distances, 'prefix_distance')
 
+    def get_clique(self, n, th):
+        nodes_in_clique = [n]
+        max_prefix_dist = 0
+        # num_hop_pred, num_hop_succ = 0, 0
+        pos = 0
+        while True:
+            # find nodes_in_clique[pos]'s neighbors
+            n = nodes_in_clique[pos]
 
-def delay_distance(d1, d2, bins=range(0, 501)):
-    """
-    根据时延的cdf计算二者的差异——用cdf曲线之间的面积度量
-    :param d1:
-    :param d2:
-    :param bins:
-    :return:
-    """
-    # print(min(d1), max(d1))
-    # print(min(d2), max(d2))
-    hist1, bin1 = np.histogram(d1, bins=bins, density=True)
-    hist2, bin2 = np.histogram(d2, bins=bins, density=True)
+            # find predecessors of current node
+            nbrs = [nbr for nbr in self.pred[n] if self.pred[n][nbr]['prefix_distance'] <= th]
+            nbrs = list(set(nbrs).difference(set(nodes_in_clique)))
+            if nbrs:
+                # num_hop_pred += 1
+                max_prefix_dist = max(max_prefix_dist, max([self.pred[n][nbr]['prefix_distance'] for nbr in nbrs]))
+                nodes_in_clique.extend(nbrs)
 
-    if np.isnan(hist1).any() or np.isnan(hist2).any():
-        return np.nan
+            # find successors of current node
+            nbrs = [nbr for nbr in self.succ[n] if self.succ[n][nbr]['prefix_distance'] <= th]
+            nbrs = list(set(nbrs).difference(set(nodes_in_clique)))
+            if nbrs:
+                # num_hop_succ += 1
+                max_prefix_dist = max(max_prefix_dist, max([self.succ[n][nbr]['prefix_distance'] for nbr in nbrs]))
+                nodes_in_clique.extend(nbrs)
 
-    cdfs = (np.cumsum(hist1), np.cumsum(hist2))
-    delta = sum(cdfs[1] - cdfs[0])
-    # plt.figure()
-    # plt.plot(cdfs[0])
-    # plt.plot(cdfs[1])
-    # plt.show()
-    assert not np.isnan(delta)
-    return delta
+            if pos == len(nodes_in_clique) - 1:
+                break
+
+            pos += 1
+        return nodes_in_clique, max_prefix_dist
+
+    def generate_block_topo(self, th):
+        node_list = list(self.nodes)
+        clique_list = []
+        while len(node_list) > 0:
+            # pick a node at random
+            n = node_list[0]
+            # find the th-clique that contains n
+            clique_n, max_prefix_dist = self.get_clique(n, th)
+            clique_list.append((clique_n, max_prefix_dist))
+            node_list = list(set(node_list).difference(set(clique_n)))
+
+        for c in clique_list:
+            nodes_in_clique, max_prefix_dist = c[0], c[1]
+            # create ip block node
+            ipb_node = get_ip_block(ip=nodes_in_clique[0], prefix_length=32 - max_prefix_dist)
+            self.add_node(ipb_node, active_ips=nodes_in_clique, prefix_length=32 - max_prefix_dist)
+
+            # connect neighbors of original ip nodes to the block node
+            preds, succs = set(), set()
+            for n in nodes_in_clique:
+                preds = preds.union(set(self.pred[n]).difference(nodes_in_clique))
+                succs = succs.union(set(self.succ[n]).difference(nodes_in_clique))
+
+            edges_to_add = []
+            for n in preds:
+                d = prefix_distance(ipaddress.IPv4Network(n).network_address,
+                                    ipaddress.IPv4Network(ipb_node).network_address)
+                edges_to_add.append((n, ipb_node, {'prefix_distance': d}))
+            for n in succs:
+                d = prefix_distance(ipaddress.IPv4Network(n).network_address,
+                                    ipaddress.IPv4Network(ipb_node).network_address)
+                edges_to_add.append((ipb_node, n, {'prefix_distance': d}))
+
+            self.add_edges_from(edges_to_add)
+            self.remove_nodes_from(nodes_in_clique)
 
 
 if "__main__" == __name__:
-    filename = './link_103.233.8.61_jp443.csv'
+    filename = './link_172.16.117.37_ph.csv'
     tf = IpTraceFileV2(filename)
     link_set = tf.extract_trace_data()
 
-    fd2dd = {}
-    for e, data in link_set.items():
-        data = list(zip(*data))
-        hop, d1, d2 = data[0][0], data[1], data[2]
-        dd = delay_distance(d1, d2)
-        if np.isnan(dd):
-            continue
-        fd = prefix_distance(ipaddress.IPv4Address(e[0]), ipaddress.IPv4Address(e[1]))
-        if fd in fd2dd:
-            fd2dd[fd].append(dd)
-        else:
-            fd2dd[fd] = [dd]
+    links = list(link_set.keys())
+    del link_set
+    ip_graph = IpTopo(name='ip-topo')
+    ip_graph.add_edges_from(links)
+    ip_graph.update_prefix_distance()
+    print(ip_graph.info())
 
-    plt.figure()
-    plt.boxplot(fd2dd.values())
-    plt.show()
-
-    # links = []
-    # for e, data in link_set.items():
-    #     edge_data = {'average_latency': 0.0,
-    #                  'hop_distance': 0}
-    #     latency_data = [item[1] for item in data if 0 < item[1] < 500]
-    #     if latency_data:
-    #         edge_data['average_latency'] = np.mean(latency_data)
-    #     edge_data['hop_distance'] = data[0][0]
-    #
-    #     links.append((e[0], e[1], edge_data))
-    #
-    # ip_graph = IpTopo(name='ip_topo')
-    # ip_graph.add_edges_from(links)
-    # print(ip_graph.info())
-    #
-    # # plot histogram of prefix distances
-    # ip_graph.update_prefix_distance()
-    # distances = [item[-1] - 0.5 for item in list(ip_graph.edges.data('prefix_distance', default=-1))]
-    # plt.figure()
-    # plt.xticks([1, 8, 16, 24, 32])
-    # plt.hist(distances, bins=np.arange(0.5, 31.6, 1), rwidth=0.8)
-    # plt.show()
-    # exit(0)
-    #
-    # # first compute the best partition
-    # G = ip_graph.to_undirected()
-    # partition = louvian.best_partition(G, weight='prefix_distance')
-    # for com in set(partition.values()):
-    #     list_nodes = [nodes for nodes in partition.keys()
-    #                   if partition[nodes] == com]
-    #     print(list_nodes)
-    #     print('==')
-    # # drawing
-    # size = float(len(set(partition.values())))
-    # pos = networkx.spring_layout(ip_graph)
-    # count = 0.
-    # for com in set(partition.values()):
-    #     count = count + 1.
-    #     list_nodes = [nodes for nodes in partition.keys()
-    #                   if partition[nodes] == com]
-    #     networkx.draw_networkx_nodes(ip_graph, pos, list_nodes, node_size=15 + count * 5, node_color=str(count / size))
-    #
-    # networkx.draw_networkx_edges(ip_graph, pos, alpha=0.5)
-    # plt.show()
-    #
-    # # exit(0)
-    #
-    # # todo: merge multiple files
-    # pass
-    #
-    # # prefix_distance2latency = [[] for i in range(32)]
-    # # for e, data in link_set.items():
-    # #     first, second = ipaddress.IPv4Address(e[0]), ipaddress.IPv4Address(e[1])
-    # #     d = prefix_distance(first, second)
-    # #     prefix_distance2latency[d - 1].extend([item[1] for item in data if 0< item[1] < 500])
-    # #
-    # # plt.figure()
-    # # plt.boxplot(prefix_distance2latency)
-    # # plt.show()
-    #
-    #
-    # distance_vs_latency = [(e[-1]['prefix_distance'], e[-1]['average_latency']) for e in ip_graph.edges.data()]
-    # distance_vs_latency = list(zip(*distance_vs_latency))
-    # x, y = distance_vs_latency[0], distance_vs_latency[1]
-    # plt.figure()
-    # plt.hist(y)
-    #
-    # plt.figure()
-    # plt.scatter(x, y)
-    # plt.show()
+    th_candidates = [19, 20]
+    for th in th_candidates:
+        print('####prefix threshold = ' + str(th))
+        ip_block_graph = copy.deepcopy(ip_graph)
+        ip_block_graph.name = 'ipb-topo_th-' + str(th)
+        ip_block_graph.generate_block_topo(th)
+        print(ip_block_graph.info())

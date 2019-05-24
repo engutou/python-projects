@@ -27,7 +27,8 @@ def prefix_distance(first, second):
     :param second: the second ipaddress.IPv4Address object
     :return: the prefix distance
     """
-    return len(bin(int(first) ^ int(second))) - 2
+    first, second = int(first), int(second)
+    return 0 if first == second else len(bin(first ^ second)) - 2
 
 
 def delay_distance(d1, d2, bins=range(0, 501)):
@@ -337,7 +338,7 @@ class IpTopo(networkx.DiGraph):
             distances[e] = prefix_distance(first, second)
         networkx.set_edge_attributes(self, distances, 'prefix_distance')
 
-    def get_clique(self, n, th):
+    def get_clique_1(self, n, th):
         nodes_in_clique = [n]
         max_prefix_dist = 0
         # num_hop_pred, num_hop_succ = 0, 0
@@ -368,22 +369,28 @@ class IpTopo(networkx.DiGraph):
             pos += 1
         return nodes_in_clique, max_prefix_dist
 
+    def pop_one_clique(self, node_list, th):
+        # pick a node at random
+        n = node_list[0]
+        nodes_in_clique = [n]
+        max_prefix_dist = 0
+        for m in node_list[1:]:
+            d = prefix_distance(ipaddress.IPv4Address(n), ipaddress.IPv4Address(m))
+            if d <= th:
+                nodes_in_clique.append(m)
+                max_prefix_dist = max(max_prefix_dist, d)
+        return nodes_in_clique, max_prefix_dist
+
     def generate_block_topo(self, th):
         node_list = list(self.nodes)
-        clique_list = []
         while len(node_list) > 0:
-            # pick a node at random
-            n = node_list[0]
-            # find the th-clique that contains n
-            clique_n, max_prefix_dist = self.get_clique(n, th)
-            clique_list.append((clique_n, max_prefix_dist))
-            node_list = list(set(node_list).difference(set(clique_n)))
 
-        for c in clique_list:
-            nodes_in_clique, max_prefix_dist = c[0], c[1]
+            # find the th-clique that contains n
+            nodes_in_clique, max_prefix_dist = self.pop_one_clique(node_list, th)
+
             # create ip block node
             ipb_node = get_ip_block(ip=nodes_in_clique[0], prefix_length=32 - max_prefix_dist)
-            self.add_node(ipb_node, active_ips=nodes_in_clique, prefix_length=32 - max_prefix_dist)
+            self.add_node(ipb_node, num_active_ips=len(nodes_in_clique), active_ips=nodes_in_clique)
 
             # connect neighbors of original ip nodes to the block node
             preds, succs = set(), set()
@@ -404,6 +411,8 @@ class IpTopo(networkx.DiGraph):
             self.add_edges_from(edges_to_add)
             self.remove_nodes_from(nodes_in_clique)
 
+            node_list = list(set(node_list).difference(set(nodes_in_clique)))
+
 
 if "__main__" == __name__:
     filename = './link_172.16.117.37_ph.csv'
@@ -417,10 +426,13 @@ if "__main__" == __name__:
     ip_graph.update_prefix_distance()
     print(ip_graph.info())
 
-    th_candidates = [19, 20]
+    th_candidates = [20]
     for th in th_candidates:
         print('####prefix threshold = ' + str(th))
         ip_block_graph = copy.deepcopy(ip_graph)
         ip_block_graph.name = 'ipb-topo_th-' + str(th)
         ip_block_graph.generate_block_topo(th)
         print(ip_block_graph.info())
+
+        for cc in networkx.simple_cycles(ip_block_graph):
+            print(cc)

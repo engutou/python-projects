@@ -3,13 +3,15 @@
 import networkx
 import ipaddress
 import os.path
-import sys
-sys.path.append('../Util')
-import Util
+# import sys
+# sys.path.append('../Util')
+# import Util
+import Util.Util as Util
 from enum import Enum, unique
 from operator import itemgetter
 import matplotlib.pyplot as plt
 import numpy as np
+import community as louvian
 
 
 def prefix_distance(first, second):
@@ -126,7 +128,7 @@ class IpTraceFileBase(object):
             for j in range(i + 1, len(rtpath)):
                 if rtpath[j] != '*':
                     if rtts:
-                        link2data[(rtpath[i], rtpath[j])] = [(j - i, max(0.0, float(rtts[j]) - float(rtts[i])))]
+                        link2data[(rtpath[i], rtpath[j])] = [(j - i, float(rtts[i]), float(rtts[j]))]
                     else:
                         link2data[(rtpath[i], rtpath[j])] = [(j - i,)]
                     i = j
@@ -259,6 +261,9 @@ class IpTraceFileV2(IpTraceFileBase):
             # example:
             #   117.194.201.244,10.42.0.224,*:* 110.185.170.129:2.85 220.166.252.137:3.45 ...
             items = lines[i].split(',')
+            # todo: multiple vantage points
+            src = items[1]
+
             trace = items[-1].split(' ')
             trace = [hop.split(':') for hop in trace]
             trace = list(zip(*trace))
@@ -291,6 +296,9 @@ class IpTopo(networkx.DiGraph):
         number_root_nodes = sum([1 for n, d in ip_graph.in_degree() if d == 0])
         info += "Number of root nodes (in degree = 0): %d\n" % number_root_nodes
 
+        number_merge_nodes = sum([1 for n, d in ip_graph.in_degree() if d > 1])
+        info += "Number of merge nodes (in degree > 1): %d\n" % number_merge_nodes
+
         return info
 
     def update_prefix_distance(self):
@@ -301,22 +309,121 @@ class IpTopo(networkx.DiGraph):
         networkx.set_edge_attributes(self, distances, 'prefix_distance')
 
 
+def delay_distance(d1, d2, bins=range(0, 501)):
+    """
+    根据时延的cdf计算二者的差异——用cdf曲线之间的面积度量
+    :param d1:
+    :param d2:
+    :param bins:
+    :return:
+    """
+    # print(min(d1), max(d1))
+    # print(min(d2), max(d2))
+    hist1, bin1 = np.histogram(d1, bins=bins, density=True)
+    hist2, bin2 = np.histogram(d2, bins=bins, density=True)
+
+    if np.isnan(hist1).any() or np.isnan(hist2).any():
+        return np.nan
+
+    cdfs = (np.cumsum(hist1), np.cumsum(hist2))
+    delta = sum(cdfs[1] - cdfs[0])
+    # plt.figure()
+    # plt.plot(cdfs[0])
+    # plt.plot(cdfs[1])
+    # plt.show()
+    assert not np.isnan(delta)
+    return delta
+
+
 if "__main__" == __name__:
-    filename = './link_172.16.117.37_ph.csv'
+    filename = './link_103.233.8.61_jp443.csv'
     tf = IpTraceFileV2(filename)
     link_set = tf.extract_trace_data()
 
-    # todo: merge multiple files
-    pass
+    fd2dd = {}
+    for e, data in link_set.items():
+        data = list(zip(*data))
+        hop, d1, d2 = data[0][0], data[1], data[2]
+        dd = delay_distance(d1, d2)
+        if np.isnan(dd):
+            continue
+        fd = prefix_distance(ipaddress.IPv4Address(e[0]), ipaddress.IPv4Address(e[1]))
+        if fd in fd2dd:
+            fd2dd[fd].append(dd)
+        else:
+            fd2dd[fd] = [dd]
 
-    ip_graph = IpTopo(name='ip_topo')
-    ip_graph.add_edges_from(link_set.keys())
-    print(ip_graph.info())
-    ip_graph.update_prefix_distance()
-
-    # plot...
-    distances = [item[-1]-0.5 for item in list(ip_graph.edges.data('prefix_distance', default=-1))]
-    h = plt.figure()
-    plt.xticks([1, 8, 16, 24, 32])
-    plt.hist(distances, bins=np.arange(0.5, 32.6, 1), rwidth=0.8)
+    plt.figure()
+    plt.boxplot(fd2dd.values())
     plt.show()
+
+    # links = []
+    # for e, data in link_set.items():
+    #     edge_data = {'average_latency': 0.0,
+    #                  'hop_distance': 0}
+    #     latency_data = [item[1] for item in data if 0 < item[1] < 500]
+    #     if latency_data:
+    #         edge_data['average_latency'] = np.mean(latency_data)
+    #     edge_data['hop_distance'] = data[0][0]
+    #
+    #     links.append((e[0], e[1], edge_data))
+    #
+    # ip_graph = IpTopo(name='ip_topo')
+    # ip_graph.add_edges_from(links)
+    # print(ip_graph.info())
+    #
+    # # plot histogram of prefix distances
+    # ip_graph.update_prefix_distance()
+    # distances = [item[-1] - 0.5 for item in list(ip_graph.edges.data('prefix_distance', default=-1))]
+    # plt.figure()
+    # plt.xticks([1, 8, 16, 24, 32])
+    # plt.hist(distances, bins=np.arange(0.5, 31.6, 1), rwidth=0.8)
+    # plt.show()
+    # exit(0)
+    #
+    # # first compute the best partition
+    # G = ip_graph.to_undirected()
+    # partition = louvian.best_partition(G, weight='prefix_distance')
+    # for com in set(partition.values()):
+    #     list_nodes = [nodes for nodes in partition.keys()
+    #                   if partition[nodes] == com]
+    #     print(list_nodes)
+    #     print('==')
+    # # drawing
+    # size = float(len(set(partition.values())))
+    # pos = networkx.spring_layout(ip_graph)
+    # count = 0.
+    # for com in set(partition.values()):
+    #     count = count + 1.
+    #     list_nodes = [nodes for nodes in partition.keys()
+    #                   if partition[nodes] == com]
+    #     networkx.draw_networkx_nodes(ip_graph, pos, list_nodes, node_size=15 + count * 5, node_color=str(count / size))
+    #
+    # networkx.draw_networkx_edges(ip_graph, pos, alpha=0.5)
+    # plt.show()
+    #
+    # # exit(0)
+    #
+    # # todo: merge multiple files
+    # pass
+    #
+    # # prefix_distance2latency = [[] for i in range(32)]
+    # # for e, data in link_set.items():
+    # #     first, second = ipaddress.IPv4Address(e[0]), ipaddress.IPv4Address(e[1])
+    # #     d = prefix_distance(first, second)
+    # #     prefix_distance2latency[d - 1].extend([item[1] for item in data if 0< item[1] < 500])
+    # #
+    # # plt.figure()
+    # # plt.boxplot(prefix_distance2latency)
+    # # plt.show()
+    #
+    #
+    # distance_vs_latency = [(e[-1]['prefix_distance'], e[-1]['average_latency']) for e in ip_graph.edges.data()]
+    # distance_vs_latency = list(zip(*distance_vs_latency))
+    # x, y = distance_vs_latency[0], distance_vs_latency[1]
+    # plt.figure()
+    # plt.hist(y)
+    #
+    # plt.figure()
+    # plt.scatter(x, y)
+    # plt.show()
